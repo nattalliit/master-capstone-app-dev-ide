@@ -1,0 +1,197 @@
+// Define a large data generator
+class LargeDataGenerator {
+    func generateData(context: NSManagedObjectContext) throws {
+        try context.performAndWait {
+            for postCount in 1...60 {
+                //add a post               
+                for attachmentCount in 1...11 {
+                    //add an attachment with an image
+                    let imageFileData = NSData(contentsOf: url!)!
+               }
+            }
+        }
+    }
+}
+
+
+//Testing a large data generator
+class TestLargeDataGenerator: CoreDataCloudKitDemoUnitTestCase {
+    func testGenerateData() throws {
+        let context = self.coreDataStack.persistentContainer.newBackgroundContext()
+        try self.generator.generateData(context: context)
+        try context.performAndWait {                     
+            let posts = try context.fetch(Post.fetchRequest())
+            for post in posts {
+                self.verify(post: post, has: 11, matching: imageDatas)
+            }
+        }
+    }
+}
+
+
+//Sync generated data in test
+func testExportThenImport() throws {
+    let exportContainer = newContainer(role: "export", postLoadEventType: .setup)
+    try self.generator.generateData(context: exportContainer.newBackgroundContext())
+    self.expectation(for: .export, from: exportContainer)
+    self.waitForExpectations(timeout: 1200)
+}
+
+//Expectation helper method
+func expectation(for eventType: NSPersistentCloudKitContainer.EventType,
+                 from container: NSPersistentCloudKitContainer) -> [XCTestExpectation] {
+    var expectations = [XCTestExpectation]()
+    for store in container.persistentStoreCoordinator.persistentStores {
+        let expectation = self.expectation(
+            forNotification: NSPersistentCloudKitContainer.eventChangedNotification,
+            object: container
+        ) { notification in
+            let userInfoKey = NSPersistentCloudKitContainer.eventNotificationUserInfoKey
+            let event = notification.userInfo![userInfoKey]               
+            return (event.type == eventType) &&
+                (event.storeIdentifier == store.identifier) &&
+                (event.endDate != nil)
+        }
+        expectations.append(expectation)
+    }
+    return expectations
+}
+
+//Import data model in test
+func testExportThenImport() throws {
+    let exportContainer = newContainer(role: "export", postLoadEventType: .setup)
+    try self.generator.generateData(context: exportContainer.newBackgroundContext())
+    self.expectation(for: .export, from: exportContainer)
+    self.waitForExpectations(timeout: 1200)
+    
+    let importContainer = newContainer(role: "import", postLoadEventType: .import)
+    self.waitForExpectations(timeout: 1200)
+}
+
+//Data generator alert action
+UIAlertAction(title: "Generator: Large Data", 
+              style: .default) {_ in
+    let generator = LargeDataGenerator()
+    try generator.generateData(context: context)
+    self.dismiss(animated: true)
+}
+
+
+//Eagerly generating thumbnail in data generator
+func generateData(context: NSManagedObjectContext) throws {
+    try context.performAndWait {
+        for postCount in 1...60 {
+            for attachmentCount in 1...11 {
+                let attachment = Attachment(context: context)
+                let imageData = ImageData(context: context)
+                imageData.attachment = attachment
+                imageData.data = autoreleasepool {
+                    let imageFileData = NSData(contentsOf: url!)!
+                    attachment.thumbnail = Attachment.thumbnail(from: imageFileData,        
+                                                                thumbnailPixelSize: 80)
+                    return imageFileData
+                }
+            }
+        }
+    }
+}
+
+//Lazily generating thumbnail in data generator
+func generateData(context: NSManagedObjectContext) throws {
+    try context.performAndWait {
+        for postCount in 1...60 {
+            for attachmentCount in 1...11 {
+                let attachment = Attachment(context: context)
+                let imageData = ImageData(context: context)
+                imageData.attachment = attachment
+                imageData.data = autoreleasepool {
+                    return NSData(contentsOf: url!)!
+                }
+            }
+        }
+    }
+}
+
+
+//Problematic verifyPosts implementation
+func verifyPosts(in context: NSManagedObjectContext) throws {
+    try context.performAndWait {
+        let fetchRequest = Post.fetchRequest()
+        let posts = try context.fetch(fetchRequest)
+
+        for post in posts {
+            // verify post
+
+            let attachments = post.attachments as! Set<Attachment>
+            for attachment in attachments {
+
+                XCTAssertNotNil(attachment.imageData)
+                //verify image
+            }
+        }
+    }
+}
+
+//Efficient verifyPosts implementation
+func verifyPosts(in context: NSManagedObjectContext) throws {
+    try context.performAndWait {
+        let fetchRequest = Attachment.fetchRequest()
+        fetchRequest.resultType = .managedObjectIDResultType
+        let attachments = try context.fetch(fetchRequest) as! [NSManagedObjectID]
+
+        for index in 0...attachments.count - 1 {
+            let attachment = context.object(with: attachments[index]) as! Attachment
+
+            //verify attachment
+            let post = attachment.post!
+            //verify post
+
+            if 0 == (index % 10) {
+                context.reset()
+            }
+        }
+    }
+}
+
+//Display logs using `log stream`
+# Application
+log stream --predicate 'process = "CoreDataCloudKitDemo" AND 
+                        (sender = "CoreData" OR sender = "CloudKit")'
+
+# CloudKit 
+log stream --predicate 'process = "cloudd" AND
+                        message contains[cd] "iCloud.com.example.CloudKitCoreDataDemo"'
+
+# Push
+log stream --predicate 'process = "apsd" AND message contains[cd] "CoreDataCloudKitDemo"'
+
+# Scheduling
+log stream --predicate 'process = "dasd" AND 
+                        message contains[cd] "com.apple.coredata.cloudkit.activity" AND
+                        message contains[cd] "CEF8F02F-81DC-48E6-B293-6FCD357EF80F"'
+
+//Display logs with `log show`
+log show --info --debug
+    --predicate 'process = "apsd" AND
+                 message contains[cd] "iCloud.com.example.CloudKitCoreDataDemo"'
+    system_logs.logarchive
+
+log show --info --debug
+    --start "2022-06-04 09:40:00"
+    --end "2022-06-04 09:42:00"
+    --predicate 'process = "apsd" AND 
+                 message contains[cd] "iCloud.com.example.CloudKitCoreDataDemo"'
+    system_logs.logarchive
+
+//Provide a predicate to `log show`
+log show --info --debug
+    --start "2022-06-04 09:40:00" --end "2022-06-04 09:42:00"
+    --predicate '(process = "CoreDataCloudKitDemo" AND
+                      (sender = "CoreData" or sender = "CloudKit")) OR
+                 (process = "cloudd" AND
+                      message contains[cd] "iCloud.com.example.CloudKitCoreDataDemo") OR
+                 (process = "apsd" AND message contains[cd] "CoreDataCloudKitDemo") OR 
+                 (process = "dasd" AND
+                     message contains[cd] "com.apple.coredata.cloudkit.activity" AND
+                     message contains[cd] "CEF8F02F-81DC-48E6-B293-6FCD357EF80F")'
+    system_logs.logarchive
