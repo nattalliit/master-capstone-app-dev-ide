@@ -1,0 +1,185 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: ci-cd-pipeline
+  namespace: sn-labs-nrudnikova
+spec:
+  params:
+    - name: build-image
+      description: Image to build
+      default: image-registry.openshift-image-registry.svc:5000/sn-labs-nrudnikova/tekton-lab:latest
+    - name: app-name
+      description: Application name for deployment
+      default: my-app
+  workspaces:
+    - name: output
+      optional: false
+  tasks:
+    - name: cleanup
+      taskRef:
+        kind: Task
+        name: cleanup
+      workspaces:
+        - name: source
+          workspace: output
+    - name: git-clone
+      runAfter:
+        - cleanup
+      taskRef:
+        kind: ClusterTask
+        name: git-clone
+      params:
+        - name: url
+          value: https://github.com/ibm-developer-skills-network/wtecc-CICD_PracticeCode
+        - name: revision
+          value: ""
+        - name: refspec
+          value: ""
+        - name: submodules
+          value: 'true'
+        - name: depth
+          value: '1'
+        - name: sslVerify
+          value: 'true'
+        - name: crtFileName
+          value: ca-bundle.crt
+        - name: subdirectory
+          value: ""
+        - name: sparseCheckoutDirectories
+          value: ""
+        - name: deleteExisting
+          value: 'true'
+        - name: httpProxy
+          value: ""
+        - name: httpsProxy
+          value: ""
+        - name: noProxy
+          value: ""
+        - name: verbose
+          value: 'true'
+        - name: gitInitImage
+          value: registry.redhat.io/openshift-pipelines/pipelines-git-init-rhel8@sha256:aa2599a70c14b4f30c9959f6ddafc2510180764d9464e6e2ec5f2147a0a0bf80
+        - name: userHome
+          value: /tekton/home
+      workspaces:
+        - name: output
+          workspace: output
+    - name: flake8
+      runAfter:
+        - git-clone
+      taskRef:
+        kind: Task
+        name: flake8
+      params:
+        - name: image
+          value: 'python:3.9-slim'
+        - name: path
+          value: .
+        - name: requirements_file
+          value: requirements.txt
+        - name: args
+          value:
+            - '--count'
+            - '--max-complexity=10'
+            - '--max-line-length=127'
+      workspaces:
+        - name: source
+          workspace: output
+    - name: nose
+      runAfter:
+        - flake8
+      taskRef:
+        kind: Task
+        name: nose
+      params:
+        - name: args
+          value: '-v'
+      workspaces:
+        - name: source
+          workspace: output
+    - name: buildah
+      runAfter:
+        - nose
+      taskRef:
+        kind: ClusterTask
+        name: buildah
+      params:
+        - name: IMAGE
+          value: $(params.build-image)
+        - name: BUILDER_IMAGE
+          value: registry.redhat.io/rhel8/buildah@sha256:ac0b8714cc260c94435cab46fe41b3de0ccbc3d93e38c395fa9d52ac49e521fe
+        - name: STORAGE_DRIVER
+          value: vfs
+        - name: DOCKERFILE
+          value: ./Dockerfile
+        - name: CONTEXT
+          value: .
+        - name: TLSVERIFY
+          value: 'true'
+        - name: FORMAT
+          value: oci
+        - name: BUILD_EXTRA_ARGS
+          value: ""
+        - name: PUSH_EXTRA_ARGS
+          value: ""
+        - name: SKIP_PUSH
+          value: 'false'
+      workspaces:
+        - name: source
+          workspace: output
+    - name: deploy
+      runAfter:
+        - buildah
+      taskRef:
+        kind: ClusterTask
+        name: openshift-client
+      params:
+        - name: SCRIPT
+          value: |
+            oc create deployment $(params.app-name) --image=$(params.build-image) --dry-run=client -o yaml | oc apply -f -
+        - name: VERSION
+          value: latest
+      workspaces:
+        - name: manifest-dir
+          workspace: output
+  finally:
+    - name: git-clone-finally
+      taskRef:
+        kind: ClusterTask
+        name: git-clone
+      params:
+        - name: url
+          value: https://github.com/ibm-developer-skills-network/wtecc-CICD_PracticeCode
+        - name: revision
+          value: ""
+        - name: refspec
+          value: ""
+        - name: submodules
+          value: 'true'
+        - name: depth
+          value: '1'
+        - name: sslVerify
+          value: 'true'
+        - name: crtFileName
+          value: ca-bundle.crt
+        - name: subdirectory
+          value: ""
+        - name: sparseCheckoutDirectories
+          value: ""
+        - name: deleteExisting
+          value: 'true'
+        - name: httpProxy
+          value: ""
+        - name: httpsProxy
+          value: ""
+        - name: noProxy
+          value: ""
+        - name: verbose
+          value: 'true'
+        - name: gitInitImage
+          value: registry.redhat.io/openshift-pipelines/pipelines-git-init-rhel8@sha256:aa2599a70c14b4f30c9959f6ddafc2510180764d9464e6e2ec5f2147a0a0bf80
+        - name: userHome
+          value: /tekton/home
+      workspaces:
+        - name: output
+          workspace: output
